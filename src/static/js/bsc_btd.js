@@ -28,34 +28,34 @@ async function main() {
 
     let table = `<table style="width:400px"><tbody><tr>`
     +`<td style="width:100px"><img src="https://boltdollar.finance/static/media/btd.2d4f5bd1.png" style="height:64px"/></td>`
-    +`<td style="width:300px">Total Supply: ${parseFloat(BTD_totalSupply).toFixed(0)} BTD`
+    +`<td style="width:300px">Total Supply: ${formatMoney(BTD_totalSupply,0)} BTD`
     +`<br>Fully diluted marketcap: $${formatMoney(BTD_price * BTD_totalSupply)}`
     +`<br><b>Price: 1 BTD = $${parseFloat(BTD_price).toFixed(4)}</b>`
-    +`<br>Your balance: <b>${parseFloat(BTD_balance).toFixed(2)} BTD = $${formatMoney(BTD_balance*BTD_price)}</b>`
+    +`<br>Your balance: <b>${formatMoney(BTD_balance,2)} BTD = $${formatMoney(BTD_balance*BTD_price)}</b>`
     +`</td></tr></tbody></table>`;
     _print(table)
 
     table = `<table style="width:400px"><tbody><tr>`
     +`<td style="width:100px"><img src="https://boltdollar.finance/static/media/bts.e00e1ef9.png" style="height:64px"/></td>`
-    +`<td style="width:300px">Total Supply: ${parseFloat(BTS_totalSupply).toFixed(0)} BTS`
+    +`<td style="width:300px">Total Supply: ${formatMoney(BTS_totalSupply, 0)} BTS`
     +`<br>Fully diluted marketcap: $${formatMoney(BTS_price * BTS_totalSupply)}`
     +`<br><b>Price: 1 BTS = $${parseFloat(BTS_price).toFixed(4)}</b>`
-    +`<br>Your balance: <b>${parseFloat(BTS_balance).toFixed(2)} BTS =  $${formatMoney(BTS_balance*BTS_price)}</b>`
+    +`<br>Your balance: <b>${formatMoney(BTS_balance,2)} BTS =  $${formatMoney(BTS_balance*BTS_price)}</b>`
     +`</td></tr></tbody></table>`
     _print(table)
 
     table = `<table style="width:400px"><tbody><tr>`
     +`<td style="width:100px"><img src="https://boltdollar.finance/static/media/btb.4beb344c.png" style="height:64px"/></td>`
-    +`<td style="width:400px">Total Supply: ${parseFloat(BTB_totalSupply).toFixed(0)} BTB`
+    +`<td style="width:400px">Total Supply: ${formatMoney(BTB_totalSupply,0)} BTB`
     +`<br>Fully diluted marketcap: $${formatMoney(BTB_price * BTB_totalSupply)}`
     +`<br><b>Price: 1 BTB = $${parseFloat(BTB_price).toFixed(4)}</b>`
-    +`<br>Your balance: <b>${parseFloat(BTB_balance).toFixed(2)} BTB =  $${formatMoney(BTB_balance*BTB_price)}</b>`
+    +`<br>Your balance: <b>${formatMoney(BTB_balance,2)} BTB =  $${formatMoney(BTB_balance*BTB_price)}</b>`
     +`</td></tr></tbody></table>`
     _print(table)
 
+
     _print('-------------------------------------------------')
     _print('')
-
 
     const prices = {
         BTD: BTD_price,
@@ -81,16 +81,22 @@ async function main() {
     _print(`Epoch duration = ${period} hours`)
     _print(`Fixed expansion during bootstrap of ${bootstrap_epochs} epochs`)
     _print(`Current epoch = ${current_epoch}`)
-    _print(`Next epoch in ${hours_until_next_epoch}h ${minutes_until_next_epoch}m ${seconds_until_next_epoch}s`)
+    if (hours_until_next_epoch<0) {
+       _print(`Epoch has ended, waiting for bot to call Treasury.allocateSeigniorage() ...`)
+    } else {
+       _print(`Next epoch in ${hours_until_next_epoch}h ${minutes_until_next_epoch}m ${seconds_until_next_epoch}s`)
+    }
     _print('')
     _print('BONDS')
-    _print(`Bonds left this epoch: ${parseFloat(bonds_left/1e18).toFixed(0)} (without taking max debt ratio into account)`)
+    _print(`Bonds left this epoch: ${formatMoney(bonds_left/1e18, 0)} (without taking max debt ratio into account)`)
     _print(`Current debt ratio: ${parseFloat(BTB_totalSupply*100/BTD_totalSupply).toFixed(2)}% (Max debt ratio: ${parseFloat(maxDebtRatioPercent/100).toFixed(2)}%)`)    
-    _print(`Bonds available for purchase this epoch: ${parseFloat(bonds_available_for_purchase/1e18).toFixed(0)}`)
+    _print(`Bonds available for purchase this epoch: ${formatMoney(bonds_available_for_purchase/1e18,0)}`)
     _print('-------------------------------------------------')
     _print('')
 
     let pools = ['BTDBUSDPool','BTSBUSDPool'];
+    let total_btdbusd_value_locked = 0;
+    let total_btsbusd_value_locked = 0;
     for (const pool_nr in pools) {
         let key = pools[pool_nr];
         showLoading()
@@ -102,7 +108,7 @@ async function main() {
         const poolId = Contracts.BATDOLLAR[key].index
         
         const STAKING_POOL = new ethers.Contract(Contracts.BATDOLLAR[key].address, Contracts.BATDOLLAR[key].abi, App.provider.getSigner());
-        const total_supply = await STAKING_POOL.totalCirculating()/1e18;
+        const total_circulating = await STAKING_POOL.getTotalCirculating()/1e18;
         const blocks_per_week = await STAKING_POOL.BLOCKS_PER_WEEK();
         const share_per_block = await STAKING_POOL.sharePerBlock()/1e18;
         const share_per_year = share_per_block * blocks_per_week * 52;
@@ -150,6 +156,11 @@ async function main() {
                  console.log('price per pancakeswap LP token = '+pricePerLP);
         const tokenPrice = pricePerLP;
 ///////////////////////////
+        if (token == BTDToken) {
+           total_btdbusd_value_locked = totalLPtokens*tokenPrice;
+        } else if (token == BTSToken) {
+           total_btsbusd_value_locked = totalLPtokens*tokenPrice;
+        }
 
         const userStakedUsd = tokenPrice * userStaked
 
@@ -172,8 +183,10 @@ async function main() {
         // DISPLAY POOL INFORMATION
 
         _print(`${key}`)
-        _print(`Total supply: ${parseFloat(total_supply).toFixed(0)} liquidity pool tokens`)
-        _print(`(Total Value Locked $${formatMoney(total_supply*tokenPrice)})`)
+        //_print(`Total LP tokens in pancakeswap: ${formatMoney(tokensInPool,0)} pancakeswap liquidity pool tokens`)
+        _print(`Total claimed rewards: ${formatMoney(total_circulating,0)} total BTS yield claimed ($${formatMoney(total_circulating*BTS_price)})`)
+        _print(`Currently staked LP tokens: ${formatMoney(totalLPtokens,0)} liquidity pool tokens`)
+        _print(`(Total Value Locked $${formatMoney(totalLPtokens*tokenPrice)})`)
         _print(`Price: <b>1 LP token = $${parseFloat(tokenPrice).toFixed(4)}</b> = ${parseFloat(tokenPerLP).toFixed(7)} ${Contracts.BATDOLLAR[key].token0} * $${formatMoney(token_price)} + ${parseFloat(busdPerLP).toFixed(4)} BUSD * $${formatMoney(busd_price)}`)
 /*
         _print(`Total shares distributed per year = ${parseFloat(share_per_year).toFixed(0)} ($${formatMoney(share_per_year*BTS_price)})`)
@@ -182,7 +195,7 @@ async function main() {
         _print(`Total shares distributed per day = ${parseFloat(share_per_year/365).toFixed(0)} ($${formatMoney(share_per_year/365*BTS_price)})`)
         _print(`Total shares distributed per epoch = ${parseFloat(share_per_year/365/(24/period)).toFixed(0)} ($${formatMoney(share_per_year/365/(24/period)*BTS_price)})`)
 */        
-        let epochRewardsPerLP = share_per_year/365/4/(24/period)/total_supply;
+        let epochRewardsPerLP = share_per_year/365/(24/period)/totalLPtokens;
         let yourRewardPerEpoch = epochRewardsPerLP * userStaked;
         
         let apr = epochRewardsPerLP*(24/period)*365*BTS_price *100 / tokenPrice;
@@ -198,19 +211,19 @@ async function main() {
         +`</tr>`
         
         +`<tr><td>BTS/LP</td>`
-        +`<td>${parseFloat(epochRewardsPerLP).toFixed(2)} BTS/LP</td>`
-        +`<td>${parseFloat(epochRewardsPerLP*(24/period)).toFixed(2)} BTS/LP</td>`
-        +`<td>${parseFloat(epochRewardsPerLP*(24/period)*7).toFixed(2)} BTS/LP</td>`
-        +`<td>${parseFloat(epochRewardsPerLP*(24/period)*365/12).toFixed(2)} BTS/LP</td>`
-        +`<td>${parseFloat(epochRewardsPerLP*(24/period)*365).toFixed(2)} BTS/LP</td>`
+        +`<td>${parseFloat(epochRewardsPerLP).toFixed(5)} BTS/LP</td>`
+        +`<td>${parseFloat(epochRewardsPerLP*(24/period)).toFixed(5)} BTS/LP</td>`
+        +`<td>${parseFloat(epochRewardsPerLP*(24/period)*7).toFixed(5)} BTS/LP</td>`
+        +`<td>${parseFloat(epochRewardsPerLP*(24/period)*365/12).toFixed(5)} BTS/LP</td>`
+        +`<td>${parseFloat(epochRewardsPerLP*(24/period)*365).toFixed(5)} BTS/LP</td>`
         +`</tr>`
 
         +`<tr><td>Bank Yield for<br> <b>${userStaked.toFixed(4)} LP staked</b></td>`
-        +`<td>${parseFloat(userStaked*epochRewardsPerLP).toFixed(2)} BTS ($${formatMoney(BTS_price*userStaked*epochRewardsPerLP)})</td>`
-        +`<td>${parseFloat(userStaked*epochRewardsPerLP*(24/period)).toFixed(2)} BTS ($${formatMoney(BTS_price*userStaked*epochRewardsPerLP*(24/period))})</td>`
-        +`<td>${parseFloat(userStaked*epochRewardsPerLP*(24/period)*7).toFixed(2)} BTS ($${formatMoney(BTS_price*userStaked*epochRewardsPerLP*(24/period)*7)})</td>`
-        +`<td>${parseFloat(userStaked*epochRewardsPerLP*(24/period)*365/12).toFixed(2)} BTS ($${formatMoney(BTS_price*userStaked*epochRewardsPerLP*(24/period)*365/12)})</td>`
-        +`<td>${parseFloat(userStaked*epochRewardsPerLP*(24/period)*365).toFixed(2)} BTS ($${formatMoney(BTS_price*userStaked*epochRewardsPerLP*(24/period)*365)})</td>`
+        +`<td>${parseFloat(userStaked*epochRewardsPerLP).toFixed(4)} BTS ($${formatMoney(BTS_price*userStaked*epochRewardsPerLP)})</td>`
+        +`<td>${parseFloat(userStaked*epochRewardsPerLP*(24/period)).toFixed(4)} BTS ($${formatMoney(BTS_price*userStaked*epochRewardsPerLP*(24/period))})</td>`
+        +`<td>${parseFloat(userStaked*epochRewardsPerLP*(24/period)*7).toFixed(4)} BTS ($${formatMoney(BTS_price*userStaked*epochRewardsPerLP*(24/period)*7)})</td>`
+        +`<td>${parseFloat(userStaked*epochRewardsPerLP*(24/period)*365/12).toFixed(4)} BTS ($${formatMoney(BTS_price*userStaked*epochRewardsPerLP*(24/period)*365/12)})</td>`
+        +`<td>${parseFloat(userStaked*epochRewardsPerLP*(24/period)*365).toFixed(4)} BTS ($${formatMoney(BTS_price*userStaked*epochRewardsPerLP*(24/period)*365)})</td>`
         +`</tr>`
 
         +`</tbody></table>`;
@@ -243,7 +256,7 @@ async function main() {
     const boardRoomRewardPerShare = (await boardRoomContract.rewardPerShare()) / 10 ** 18
     const latestSnapshotIndex = (await boardRoomContract.latestSnapshotIndex())
     const directors = await boardRoomContract.directors(App.YOUR_ADDRESS)
-    const last_action_epoch = directors[0];
+    const last_action_epoch = directors[2];
     const epochs_since_last_action = current_epoch - last_action_epoch;
     const lastHistory = (await boardRoomContract.boardHistory(latestSnapshotIndex));
     const lastRewardsPerShare = lastHistory[2];
@@ -273,7 +286,7 @@ async function main() {
     }
 
     _print(`BOARD ROOM INFORMATION`)
-    _print(`There are ${parseFloat(boardRoomTotalSupply).toFixed(0)} BTS staked in the boardroom`);
+    _print(`There are ${formatMoney(boardRoomTotalSupply,0)} BTS staked in the boardroom`);
     _print(`(Total Value Locked: $${formatMoney(boardRoomTotalSupply * BTS_price)})`)
     
     table = `<table style="width:800px"><thead><th style="width:30px;text-align:left"></th><th style="width:20px;text-align:left">Epoch (${period} hours)</th><th style="width:20px;text-align:left">Day</th><th style="width:20px;text-align:left">Week</th><th style="width:20px;text-align:left">Month</th><th style="width:20px;text-align:left">Year</th></thead>`
@@ -308,12 +321,13 @@ async function main() {
 
     _print(`You have staked <b>${parseFloat(inBoardRoom).toFixed(4)} BTS ($${formatMoney(BTS_price*inBoardRoom)})</b>`)
     if (epochs_since_last_action<3) {
-       _print(`You have to wait ${3-epochs_since_last_action} more epochs to be able to claim rewards!`)
+       _print(`You have to wait ${3-epochs_since_last_action} more epochs to be able to claim BTD rewards!`)
     }
     _print(`Your claimable rewards: <b>${parseFloat(boardRoomEarned).toFixed(2)} BTD ($${formatMoney(boardRoomEarned * BTD_price)})</b>`)
     if (epochs_since_last_action<6) {
-       _print(`You have to wait ${6-epochs_since_last_action} more epochs to be able to unstake from boardroom!`)
+       _print(`You have to wait ${6-epochs_since_last_action} more epochs to be able to unstake BTS from boardroom!`)
     }
+//    _print(`The epoch of your last boardroom action: ${last_action_epoch} `)
     _print('')
     
     _print_link(`Approve ${parseFloat(BTS_balance).toFixed(2)} BTS`, approveFunc)
@@ -322,6 +336,17 @@ async function main() {
     _print_link(`Claim ${boardRoomEarned.toFixed(2)} BTD`, claimBoardRoomReward)
     _print_link(`Revoke approval`, revokeFunc)
     _print_link(`Exit`, exitBR)
+    
+    
+    _print('-------------------------------------------------')
+    _print('')
+    const total_market_capital = (BTD_price * BTD_totalSupply) + (BTS_price * BTS_totalSupply) + (BTB_price * BTB_totalSupply);
+    const total_value_locked = (boardRoomTotalSupply * BTS_price) + total_btdbusd_value_locked + total_btsbusd_value_locked;
+
+    _print(`MARKET SUMMARY`)
+    _print(`Protocol Market Capital = $${formatMoney(total_market_capital)}`)
+    _print(`Protocol Total Value Locked = $${formatMoney(total_value_locked)}`)
+
     hideLoading();
 }
 
